@@ -1,16 +1,14 @@
 import os
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 import time
-# from nets.transformer import AttentionModel
-from nets.our_DRL import AttentionModel  # 自己设计的结构
+import sys
 import datetime
 import numpy as np
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from nets.point_network import DRL4EVRP
-from reinforce_baselines import ExponentialBaseline, CriticBaseline, RolloutBaseline, WarmupBaseline, \
-    StateCritic
+from nets.PointNetwork import DRL4EVRP
+from utils.reinforce_baselines import ExponentialBaseline, CriticBaseline, RolloutBaseline, WarmupBaseline, StateCritic
 from utils import torch_load_cpu, move_to
 import math
 import xlwt
@@ -56,7 +54,7 @@ def validate(data_loader, actor, render_fn, num_nodes, charging_num, save_dir='.
 
 def clip_grad_norms(param_groups, max_norm=math.inf):
     """
-    Clips the norms for all param groups to max_norm and returns gradient norms before clipping
+     Clips the norms for all param groups to max_norm and returns gradient norms before clipping
     :param optimizer:
     :param max_norm:
     :param gradient_norms_log:
@@ -93,7 +91,6 @@ def train(actor, baseline, optimizer, lr_scheduler, task, num_nodes, train_data_
 
     epoch_reward = []  # 回合的平均奖励
     epoch_loss = []
-
 
     # 回合开始时创建训练数据保存保存路径
     out_path_epoch = os.path.join("train_data", f"{num_nodes}", f"{baselines}", f"Epoch_C{num_nodes}_{now}.csv")
@@ -213,19 +210,27 @@ def train(actor, baseline, optimizer, lr_scheduler, task, num_nodes, train_data_
 
 
 def train_EVRP(args):
+    """
+    train
+    """
     from problems import EVRP
     from problems.EVRP import VehicleRoutingDataset
+    if args.model == "DRL":
+        from nets.DRLModel import AttentionModel
+    elif args.model == "AM":
+        from nets.AM import AttentionModel
+    elif args.model == "pointer":
+        from nets.PointNetwork import DRL4EVRP
+    else:
+        print("Please enter a correct network name")
+        sys.exit("Error message, program terminated.")
 
     # Determines the maximum amount of load for a vehicle based on num nodes
-    LOAD_DICT = {10: 4, 20: 4, 50: 4, 100: 4}
     MAX_DEMAND = 4
-    STATIC_SIZE = 2  # (x, y)
-    DYNAMIC_SIZE = 4  # (load, demand,soc,time)
-    #
-    # max_load = LOAD_DICT[args.num_nodes]
-    max_load = 4
+    STATIC_SIZE = 2    # (x, y)
+    DYNAMIC_SIZE = 4   # (load, demand,soc,time)
+    max_load = 4       # BYD vans 4000KG
 
-    # 制作好训练数据
     train_data = VehicleRoutingDataset(args.train_size,
                                        args.num_nodes,
                                        args.t_limit,
@@ -237,7 +242,6 @@ def train_EVRP(args):
                                        args.seed,
                                        args)
 
-    # 制作好测试数据
     valid_data = VehicleRoutingDataset(args.valid_size,
                                        args.num_nodes,
                                        args.t_limit,
@@ -249,7 +253,6 @@ def train_EVRP(args):
                                        args.seed + 2,
                                        args)
 
-    # 设置好模型，这次的模型是基于pointer——network的不需要使用并行计算
     if args.model == "pointer":
         actor = DRL4EVRP(STATIC_SIZE,
                          DYNAMIC_SIZE,
@@ -274,9 +277,8 @@ def train_EVRP(args):
     else:
         raise ValueError('choose the right model ')
 
-    # 准备加载模型
     load_data = {}
-    if args.checkpoint:  # 看是否有预训练模型，其中checkpoint直接表示到预训练模型的pt文件位置
+    if args.checkpoint:
         load_path = os.path.join(args.checkpoint)
         if load_path is not None:
             print('  [*] Loading data from {}'.format(load_path))
@@ -284,10 +286,8 @@ def train_EVRP(args):
 
     actor.load_state_dict({**actor.state_dict(), **load_data.get('model', {})})
 
-
-    if not args.test:  # 训练
-        # 初始化基线
-        if args.baselines == 'exponential':  # 这种baseline只需存储self.v, 及对应回合的基线取值
+    if not args.test:  # train
+        if args.baselines == 'exponential':
             baseline = ExponentialBaseline(args.exp_beta)
         elif args.baselines == 'critic':
             baseline = CriticBaseline(
@@ -302,7 +302,7 @@ def train_EVRP(args):
         # Load baseline from data, make sure script is called with same type of baseline
         if 'baseline' in load_data:
             baseline.load_state_dict(load_data['baseline'])
-        # 初始化优化器
+        # Initialize the optimizer
         optimizer = optim.Adam(
             [{'params': actor.parameters(), 'lr': args.actor_lr}]
             + (
@@ -316,22 +316,22 @@ def train_EVRP(args):
             for state in optimizer.state.values():
                 for k, v in state.items():
                     if torch.is_tensor(v):
-                        state[k] = v.to(device)  # 这是实际上只是把优化器参数放到gpu上
+                        state[k] = v.to(device)
 
         lr_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr_decay ** epoch)
-        # 设置传入参数
+
         kwargs = vars(args)
         kwargs['optimizer'] = optimizer
         kwargs['lr_scheduler'] = lr_scheduler
         kwargs['train_data_out'] = train_data
         kwargs['valid_data'] = valid_data
         kwargs['render_fn'] = EVRP.render
-        # 开始训练
+        # train
         epoch_reward, epoch_loss= train(actor, baseline, **kwargs)
-        # 将结果写入excel
+        # save data to excel
         book = xlwt.Workbook(encoding='utf-8', style_compression=0)
-        sheet = book.add_sheet(f'完整训练_{args.baselines}_C{args.num_nodes}', cell_overwrite_ok=True)
-        col = ('每个回合平均奖励', '每个回合平均损失')
+        sheet = book.add_sheet(f'train_{args.baselines}_C{args.num_nodes}', cell_overwrite_ok=True)
+        col = ('Average reward per epoch', 'Average loss per epoch')
         end = '%s' % datetime.datetime.now().time()
         end = end.replace(':', '_')
         for i in range(0, 2):
@@ -339,15 +339,17 @@ def train_EVRP(args):
         for i in range(0, len(epoch_reward)):
             sheet.write(i + 1, 0, epoch_reward[i])
             sheet.write(i + 1, 1, epoch_loss[i])
-            # sheet.write(i + 1, 2, epoch_energy[i])
-        save_path = os.path.join('train_data', f"{args.num_nodes}", f"{args.baselines}", f'完整训练C{args.num_nodes}_{end}.xls')
+        save_path = os.path.join("ExperimentalData", 'train_data', f"{args.num_nodes}", f"{args.baselines}")
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+        save_path = os.path.join(save_path, f'trainC{args.num_nodes}_{end}.xls')
         book.save(save_path)
 
-    else:  # 测试
-        if args.test_file and not args.depot_charging:
+    else:  # test
+        if args.test_file:
             print("Load test data")
             test_data = EVRPDataset(args.test_file, num_samples=1, offset=0)
-        else:  # 不存在测试文件则自己生成
+        else:
             print("generate test data")
             test_data = VehicleRoutingDataset(args.test_size,
                                               args.num_nodes,
@@ -359,29 +361,34 @@ def train_EVRP(args):
                                               args.charging_num,
                                               args.test_seed,
                                               args)
-            # 将数据保存到文件以便于测试以及对比
+            # Save data to file for testing and comparison
             test_dataloader = DataLoader(test_data, args.test_size, False, num_workers=0)
             for i in test_dataloader:
                 data = i
             static, dynamic, distances, slope = data
-            thedata = list(zip(static.tolist(),           # [2, sequence_len] 坐标信息
-                               dynamic.tolist(),          # [4, sequence_len] 动态信息 loads, demands, SOC, time
+            thedata = list(zip(static.tolist(),           # [2, sequence_len] coordinate information
+                               dynamic.tolist(),          # [4, sequence_len] Dynamic information: loads, demands, SOC, time
                                distances.tolist(),        # [sequence_len, sequence_len]
                                slope.tolist()             # [sequence_len, sequence_len]
                                ))
-            if not args.CVRP_lib_test:
-                filename = os.path.join("test_data", f"{args.num_nodes}",f'{args.test_size}_seed{args.test_seed}.pkl')
+            if args.CVRP_lib_test:
+                filepath = os.path.join("ExperimentalData", "CVRPlib")
+                name = args.CVRP_lib_path.split("/")[-1]
+                if not os.path.exists(filepath):
+                    os.makedirs(filepath)
+                filename = os.path.join(filepath, name)
             else:
-                path1 = args.CVRP_lib_path.split("/")[-1]
-                filename = os.path.join("test_data", "CVRPlib", f"{path1}.pkl")
+                filepath = os.path.join("ExperimentalData", "test_data", f"{args.num_nodes}")
+                if not os.path.exists(filepath):
+                    os.makedirs(filepath)
+                filename = os.path.join(filepath, f'{args.test_size}_seed{args.test_seed}.pkl')
             save_dataset(thedata, filename)
-
-        # test主程序
-        widths = args.width if args.width is not None else [0]   # 之后记得args.width要写成列表形式
+        widths = args.width if args.width is not None else [0]  # list
         for width in widths:
             mean_costs, duration = eval_dataset(test_data, width, args.softmax_temperature, args, actor, EVRP.render)
 
 
+#  test function
 def eval_dataset(test_date, width, softmax_temp, args, actor, render):
     # Even with multiprocessing, we load the model here since it contains the name where to write results
     model = actor
@@ -389,10 +396,10 @@ def eval_dataset(test_date, width, softmax_temp, args, actor, render):
     results = _eval_dataset(model, dataset, width, softmax_temp, args, render)
 
     parallelism = args.eval_batch_size
-    costs, durations = zip(*results)  # torch和numpy之间注意转换
+    costs, durations = zip(*results)
     costs = torch.cat(costs, dim=0)
     costs = costs.cpu().numpy()
-    # 将测试结果写入文件
+    # save to file
     if not args.CVRP_lib_test:
         now_time = '%s' % datetime.datetime.now().time()
         now_time = now_time.replace(':', '_')
@@ -403,7 +410,7 @@ def eval_dataset(test_date, width, softmax_temp, args, actor, render):
                 writer.writerow([costs[i], durations[i]])
             writer.writerow("####### mean value ###########")
             writer.writerow([np.mean(costs), np.mean(durations)])
-    # 打印测试结果
+
     print("Average cost: {} +- {}".format(np.mean(costs), 2 * np.std(costs) / np.sqrt(len(costs))))
     print("Average batch duration: {} +- {}".format(
         np.mean(durations), 2 * np.std(durations) / np.sqrt(len(durations))))
@@ -445,14 +452,14 @@ def _eval_dataset(model, dataset, width, softmax_temp, args, render=None):
                 assert args.decode_strategy == 'bs'
                 costs, min_sequence = model.beam_search(batch, beam_width=width)
         duration = time.time() - start
-        results.append((costs, duration))  # 每一个batch计算一次cost+duration
+        results.append((costs, duration))
         if render is not None and batch_idx < args.plot_num:
             static, dynamic, _, _ = batch
             name = f'batch%d_%2.4f.png' % (batch_idx, costs[0].item())
             if not args.CVRP_lib_test:
                 path = os.path.join("test", f"{args.num_nodes}", "graph")
             else:
-                path = os.path.join("test", "CVRPlib")
+                path = os.path.join("test", "Experimental data/CVRPlib")
             if not os.path.exists(path):
                 os.makedirs(path)
             save_path =os.path.join(path, name)
@@ -469,12 +476,6 @@ def make_instance(i):
 
 
 def EVRPDataset(filename=None,  num_samples=256, offset=0):
-    """
-    :param filename: 需要读取的文件名
-    :param num_samples: 读取实例的数量
-    :param offset: 从哪个位置开始读
-    :return: 读取的数据，列表形式，每一个列表中是一个字典
-    """
     assert os.path.splitext(filename)[1] == '.pkl'
     with open(filename, 'rb') as f:
         data = pickle.load(f)  # (N, size, 2)

@@ -12,6 +12,7 @@ from utils import move_to
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+
 class StateCritic(nn.Module):
     """Estimates the problem complexity.
 

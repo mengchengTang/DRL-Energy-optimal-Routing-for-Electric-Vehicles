@@ -11,7 +11,7 @@ import csv
 import time
 
 
-#  处理实例数据
+# 处理实例数据
 def make_instance(args):
     static, dynamic, distance, slope = args
     grid_size = 1
@@ -392,8 +392,6 @@ class EVRP():
     def plot_graph(self, solution):
         # 画图
         routes = solution.routes
-        # print(solution.cost_list)
-        # print(routes)
         fig = plt.figure(figsize=(10, 10))
         xc = self.static[0, :]
         yc = self.static[1, :]
@@ -424,7 +422,7 @@ class EVRP():
 
 
     def run(self):
-        # 主程序
+        # main
         start = time.time()
         sol = Sol()
         sol.cost= float('inf')
@@ -442,9 +440,9 @@ class EVRP():
 
 
 if __name__ == '__main__':
-    # 参数
+    # args
     parser = argparse.ArgumentParser(description='ACO solving electric vehicle routing problem')
-    # 图上参数
+    # grapg args
     parser.add_argument('--nodes',  default=20, type=int)
     parser.add_argument('--CVRP_lib_test', default=False)
     parser.add_argument('--Start_SOC', default=80, type=float, help='SOC, unit: kwh')
@@ -464,11 +462,9 @@ if __name__ == '__main__':
     # filename = os.path.join("..","test_data","CVRPlib","P-n101-k4.txt.pkl")
     filename = os.path.join("..", "test_data", "20", "256_seed12345.pkl")
     date = HCVRPDataset(filename, num_samples=256, offset=0)
-    # date = date[27:28] #取数据在哪个区间
     costs = []
     times = []
     for i in range(len(date)):
-        # 传入的参数名称分别为：
         print(i)
         instance = EVRP(i,date[i], args.t_limit, args.Start_SOC, args.velocity, args.max_load, alpha=args.alpha, beta=args.beta, rho=args.rho, epochs=args.epoch, ant_number = args.ant_number, plot_num = args.plot_num)
         optim_cost, solution_time = instance.run()
