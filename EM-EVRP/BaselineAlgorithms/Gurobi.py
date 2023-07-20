@@ -90,27 +90,26 @@ class VehicleRouting():
         y = self.model.addVars(v, vtype=GRB.CONTINUOUS, name='y')
         time_c = self.model.addVars(v, vtype=GRB.CONTINUOUS, name="t_c")
 
-
         self.model.setObjective(quicksum(self.motor_d * self.battery_d * (((self.g * g[i, j]) + (self.g * self.Cr)) * (self.mc + w[i, j] * self.w)
                                              + (vehicleSpecificConstant * ((self.velocity / 3.6) ** 2))) * c[i, j] / 3600 * x[i, j]
                                          for i, j in A if i != j), GRB.MINIMIZE)
 
-        # 约束一：每个客户点只能访问一次
+        # 1
         self.model.addConstrs(quicksum(x[i, j] for j in v if j != i) == 1 for i in nc)
-        # 约束二：充电站访问可以少于一次
+        # 2
         self.model.addConstrs(quicksum(x[i, j] for j in v if j != i) <= 1 for i in nf)
-        # 约束三：流量守恒
+        # 3
         self.model.addConstrs(
             quicksum(x[j, i] for i in v if i != j) - quicksum(x[i, j] for i in v if i != j) == 0 for j in v)
-        # 约束四：货物量约束
+        # 4
         self.model.addConstrs(
             quicksum(w[j, i] for j in v if i != j) - quicksum(w[i, j] for j in v if i != j) == d[i] for i in nc + nf)
-        # 约束五：小于最大装载量约束在0~max_load之间
+        # 5
         self.model.addConstrs(w[i, j] <= self.max_load * x[i, j] for i, j in A if i != j)
         self.model.addConstrs(w[i, j] >= 0 for i, j in A if i != j)
-        # 约束六：车辆返回仓库是载重拉满
+        # 6
         self.model.addConstrs(w[0, j] == self.max_load * x[0, j] for j in v)
-        # 约束六：去往客户点的能量消耗约束
+        # 7
         self.model.addConstrs(
             self.motor_d * self.battery_d * (((self.g * g[i, j]) + (self.g * self.Cr)) * (self.mc + w[i, j] * self.w)
                                              + (vehicleSpecificConstant * ((self.velocity / 3.6) ** 2))) * c[i, j] / 3600 * x[i, j]
@@ -121,7 +120,7 @@ class VehicleRouting():
                         + (vehicleSpecificConstant * ((self.velocity / 3.6) ** 2))) * c[i, j] / 3600 * x[
                 i, j] + self.Start_SOC * (1 - x[i, j]) for i in v for j in nc)
 
-        # 约束八：去往充电站的能量消耗约束
+        # 8
         self.model.addConstrs(
             self.motor_d * self.battery_d * (((self.g * g[i, j]) + (self.g * self.Cr)) * (self.mc + w[i, j] * self.w)
                                              + (vehicleSpecificConstant * ((self.velocity / 3.6) ** 2))) * c[i, j] / 3600 * x[i, j]
@@ -132,17 +131,17 @@ class VehicleRouting():
             + self.Start_SOC * (1 - x[i, j])  for i in v for j in nf)
 
         self.model.addConstrs(y[i] == self.Start_SOC for i in chargingStationSet)
-        # 约束九：总能耗约束
+        # 9
         self.model.addConstrs(y[i] >= self.motor_d * self.battery_d * (((self.g * g[i, 0]) + (self.g * self.Cr)) * (self.mc + w[i, 0] * self.w)
                                              + (vehicleSpecificConstant * ((self.velocity / 3.6) ** 2))) * c[i, 0] / 3600 * x[i, 0]   for i in nc)
 
-        # 约束十：追踪时间约束
+        # 10
         self.model.addConstrs((t[i,j] + 0.33) * x[i,j] - self.t_limit * (1-x[i,j]) <= time_c[j] - time_c[i] for i in v for j in nc)
         self.model.addConstrs(time_c[j] - time_c[i] <= (t[i, j] + 0.33) * x[i, j] + self.t_limit * (1 - x[i, j])  for i in v for j in nc)
-        # 到达充电站的约束
+        # 11
         self.model.addConstrs((t[i, j] + 1) * x[i, j] - self.t_limit * (1 - x[i, j]) <= time_c[j] - time_c[i] for i in v for j in nf)
         self.model.addConstrs(time_c[j] - time_c[i] <= (t[i, j] + 1) * x[i, j] + self.t_limit * (1 - x[i, j])  for i in v for j in nf)
-        # 从仓库出发的时间约束
+        # 12
         self.model.addConstrs(time_c[i] == 0 for i in depot)
         self.model.addConstrs(time_c[i] <= self.t_limit - t[i,0] * x[i, 0] for i in nc+nf)
 
@@ -159,7 +158,6 @@ class VehicleRouting():
                 if i != 0 and x[0, i].x > 0.9:
                     K += 1
             routes = []
-
             for i in v:
                 if i != 0 and x[0, i].x > 0.9:
                     aux = [0, i]
@@ -170,7 +168,6 @@ class VehicleRouting():
                                 aux.append(h)
                                 i = h
                     routes.append(aux)
-
             power = []
             for i in v:
                 for j in v:
@@ -178,8 +175,6 @@ class VehicleRouting():
                         power.append(w[i,j].x)
                         power.append(i)
                         power.append(j)
-            print(power)
-
 
             fig = plt.figure(figsize=(10,10))
             xc = self.static[0, :]
@@ -190,7 +185,6 @@ class VehicleRouting():
             plt.scatter(xc[1:f+1], yc[1:f+1], c='g')
             plt.scatter(xc[0], yc[0], c='r')
             for i in nc:
-
                 plt.text(xc[i], yc[i] + 3,"C" + format(i))
             for i in nf:
                 plt.text(xc[i], yc[i] + 3, "F" + format(i))
@@ -202,9 +196,11 @@ class VehicleRouting():
             plt.ylim(-5,105)
 
             if not args.CVRP_lib_test:
-                save_path = os.path.join("graph", f"{self.custom_num}", "gurobi")
+                save_path = os.path.join("graph", f"{self.custom_num}", "Gurobi")
             else:
                 save_path = os.path.join("graph", "CVRPlib")
+            if not os.path.exists(save_path):
+                os.makedirs(save_path)
             name = f'batch%d_%2.4f.png' % (self.i, self.model.ObjVal)
             save_path = os.path.join(save_path, name)
             plt.savefig(save_path, bbox_inches='tight', dpi=100)
@@ -213,11 +209,10 @@ class VehicleRouting():
         solution_time = self.model.Runtime
 
         if not args.CVRP_lib_test:
-            out_path = os.path.join("data_record", f"{self.custom_num}", "gurobi", f"online_C{self.custom_num}_{now}.csv")
+            out_path = os.path.join("data_record", f"{self.custom_num}", "Gurobi", f"online_C{self.custom_num}_{now}.csv")
             with open(out_path, "a", newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 writer.writerow([optim_cost, solution_time])
-
         return optim_cost, solution_time
 
 
@@ -236,16 +231,13 @@ if __name__ == '__main__':
     parser.add_argument('--plot_num', default=1,  help='whether plot')
     args = parser.parse_args()
 
-    filename = os.path.join("..", "test_data",f"{args.nodes}", "256_seed12345.pkl")
-    # filename = os.path.join("..", "test_data", "CVRPlib", "P-n40-k5.txt.pkl")
+    filename = os.path.join()
     date = HCVRPDataset(filename, num_samples=256, offset=0)
-
     costs = []
     times = []
     energy_costs = []
     now = '%s' % datetime.datetime.now().time()
     now = now.replace(':', '_')
-    output_path = os.path.join("data_record", "20", "gurobi", f"{now}.csv")
     for instance in range(len(date)):
         EVRP = VehicleRouting(instance,date[instance], args.t_limit, args.Start_SOC, args.velocity, args.max_load, args.nodes, args.charging_num, args.plot_num)
         optim_cost, solution_time = EVRP.build_model()
@@ -254,7 +246,7 @@ if __name__ == '__main__':
     mean_cost = np.mean(costs)
     mean_time = np.mean(times)
 
-
+    output_path = os.path.join("data_record", f"{args.nodes}", "Gurobi", f"{now}.csv")
     if not args.CVRP_lib_test:
         with open(output_path, "a", newline='') as csvfile:
             writer = csv.writer(csvfile)

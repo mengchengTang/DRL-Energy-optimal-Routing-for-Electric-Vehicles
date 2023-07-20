@@ -43,7 +43,7 @@ class Sol():
 
 
 class EVRP():
-    def __init__(self, i, instance, t_limit, Start_SOC, velocity, max_load, alpha, beta, rho, epochs, ant_number, plot_num):
+    def __init__(self, args, i, instance, t_limit, Start_SOC, velocity, max_load, alpha, beta, rho, epochs, ant_number, plot_num):
 
         self.i = i
         self.static = instance["static"]
@@ -52,10 +52,9 @@ class EVRP():
         self.slope = instance["slope"]
 
         self.demands = self.dynamic[1] * max_load
-        num_dict = {15:10, 25:20, 59:50, 109:100, 26:20}
         self.num = self.static.shape[1]
-        self.custom_num = num_dict[self.num]
-        self.charge_num = self.num - self.custom_num - 1
+        self.custom_num = args.nodes
+        self.charge_num = args.charging_num
         self.plot_num = plot_num
 
         self.max_load = max_load
@@ -136,10 +135,6 @@ class EVRP():
             if open_node[i]:
 
                 eta = abs(self.distances[now_node, 0] + self.distances[0, i] - self.distances[now_node, i])
-                # print(self.distances[now_node, 0])
-                # print(self.distances[0,i])
-                # print(self.distances[now_node, i])
-                # print(eta)
                 # eta1 = abs(1 / self.Soc_Consume(now_node, i, self.max_load))
                 # eta2 = self.Soc_Consume(0, now_node, self.max_load) + self.Soc_Consume(now_node, 0, self.max_load - self.demands[now_node]) \
                 #        + self.Soc_Consume(0, i, self.max_load) + self.Soc_Consume(i, 0, self.max_load - self.demands[i]) \
@@ -154,7 +149,6 @@ class EVRP():
             for i in range(len(open_node)):
                 if open_node[i] == 1:
                     next_node = i
-
         # assert total_prob > 0.0,  " The total prob should >0 "
         else:
             temp_prob = random.uniform(0.0, total_prob)
@@ -344,9 +338,7 @@ class EVRP():
     def upate_pheromone(self,):
 
         rho = self.rho
-
         self.pheromone = (1 - rho) * self.pheromone
-
         for sol in self.solution_list:
             routes=sol.routes
             for route in routes:
@@ -357,7 +349,6 @@ class EVRP():
 
 
     def plot_graph(self, solution):
-
         routes = solution.routes
         fig = plt.figure(figsize=(10, 10))
         xc = self.static[0, :]
@@ -383,6 +374,8 @@ class EVRP():
             save_path = os.path.join("graph", f"{self.custom_num}", "ACO")
         else:
             save_path = os.path.join("graph",  "CVRPlib")
+        if not os.path.exists(save_path):
+            os.mkdir(save_path)
         name = f'batch%d_%2.4f.png' % (self.i, solution.cost)
         save_path = os.path.join(save_path, name)
         plt.savefig(save_path, bbox_inches='tight', dpi=100)
@@ -415,25 +408,25 @@ if __name__ == '__main__':
     parser.add_argument('--Start_SOC', default=80, type=float, help='SOC, unit: kwh')
     parser.add_argument('--velocity', default=50, type=float, help='unit: km/h')
     parser.add_argument('--max_load', default=4, type=float, help='the max load of vehicle')
-    parser.add_argument('--charging_num', default=5, type=int, help='number of charging_station')
+    parser.add_argument('--charging_num', default=4, type=int, help='number of charging_station')
     parser.add_argument('--t_limit', default=10, type=float, help='tour duration time limitation, 12 hours')
     parser.add_argument('--epoch', default=600, type=int, help='epoch of iteration 10:400 20:600 50:800 100:1000')
-    parser.add_argument('--plot_num', default=0, help='画图的个数')
-    # 蚁群算法参数
-    parser.add_argument('--alpha',  default=3, type=float, help="启发信息权重")
+    parser.add_argument('--plot_num', default=0, )
+
+    parser.add_argument('--alpha',  default=3, type=float,)
     parser.add_argument('--beta', default=1, type=float, help='')
-    parser.add_argument('--rho', default=0.1, type=float, help='信息素挥发因子')
-    parser.add_argument('--ant_number', default=80, type=int, help='蚂蚁数量')
+    parser.add_argument('--rho', default=0.1, type=float, )
+    parser.add_argument('--ant_number', default=80, type=int, )
 
     args = parser.parse_args()
-    # filename = os.path.join("..","test_data","CVRPlib","P-n101-k4.txt.pkl")
-    filename = os.path.join("..", "test_data", "20", "256_seed12345.pkl")
+
+    filename = os.path.join()
     date = HCVRPDataset(filename, num_samples=256, offset=0)
     costs = []
     times = []
     for i in range(len(date)):
         print(i)
-        instance = EVRP(i,date[i], args.t_limit, args.Start_SOC, args.velocity, args.max_load, alpha=args.alpha, beta=args.beta, rho=args.rho, epochs=args.epoch, ant_number = args.ant_number, plot_num = args.plot_num)
+        instance = EVRP(args, i,date[i], args.t_limit, args.Start_SOC, args.velocity, args.max_load, alpha=args.alpha, beta=args.beta, rho=args.rho, epochs=args.epoch, ant_number = args.ant_number, plot_num = args.plot_num)
         optim_cost, solution_time = instance.run()
         costs.append(optim_cost)
         times.append(solution_time)

@@ -4,7 +4,7 @@ from torch.utils.checkpoint import checkpoint
 import math
 from typing import NamedTuple
 from utils.tensor_functions import compute_in_batches
-from nets.graph_encoder import GraphAttentionEncoder
+from nets.GraphEncoder import GraphAttentionEncoder
 from torch.nn import DataParallel
 from utils.beam_search import CachedLookup
 import torch.nn.functional as F
@@ -67,17 +67,17 @@ class AttentionModel(nn.Module):
         self.update_dynamic = update_dynamic
         self.update_mask = update_mask
         self.n_heads = n_heads
-        step_context_dim = embedding_dim + 1  # 当前只考虑剩余容量、剩余soc、剩余时间
-        # 图上的一些参数
+        step_context_dim = embedding_dim + 1
+
         self.start_soc = args.Start_SOC
         self.t_limit = args.t_limit
         self.custom_num = args.num_nodes
         self.charging_num = args.charging_num
-        # 对各个点进行编码的方式
-        node_dim = 3  # x, y, 需求
+
+        node_dim = 3
         self.init_embed_depot_and_station = nn.Linear(2, embedding_dim)
         self.init_embed_station = nn.Linear(2, embedding_dim)
-        self.init_embed = nn.Linear(node_dim, embedding_dim)  # 进入编码器之前进行一次编码
+        self.init_embed = nn.Linear(node_dim, embedding_dim)
         self.embedder = GraphAttentionEncoder(
             n_heads=n_heads,
             embed_dim=embedding_dim,
@@ -99,11 +99,11 @@ class AttentionModel(nn.Module):
 
     def forward(self, input,):
         """
-        :param input: 原始数据为一个元组 (static, dynamic, distances, slopes)
-        :param return_pi: 这里选择返回所选序列，因为需要画图
-        :return: tour_idx, tour_logp, R 保持与pointer的一致
+        :param input:
+        :param return_pi:
+        :return:
         """
-        # 处理输入数据，
+
         batch_size, _, num_node = input[0].shape
         lenth = len(input)
         if lenth == 4:
@@ -116,7 +116,7 @@ class AttentionModel(nn.Module):
             static, dynamic, Elevations = input
             static = static.float().to(device)
             dynamic = dynamic.float().to(device)
-            distances = torch.zeros(batch_size, num_node, num_node, device=device,)  # 计算距离矩阵
+            distances = torch.zeros(batch_size, num_node, num_node, device=device,)
             for i in range(num_node):
                 distances[:, i] = torch.sqrt(torch.sum(torch.pow(static[:, :, i:i + 1]- static[:, :, :], 2), dim=1))
             slope = torch.zeros(batch_size, num_node, num_node, device=device)
@@ -127,7 +127,7 @@ class AttentionModel(nn.Module):
         embeddings, _ = self.embedder(self._init_embed(information[:, :, [0,1,3]]))
 
         _log_p,  pi,  cost = self._inner(information, distances, slope, embeddings)
-        #  概率对数值
+
         ll = self._calc_log_likelihood(_log_p, pi)
 
         return pi , ll , cost
@@ -182,7 +182,6 @@ class AttentionModel(nn.Module):
         return log_p
 
     def _init_embed(self, input):
-        # 对点的原始信息进行嵌入
         return torch.cat(
             (
                 self.init_embed_depot_and_station(input[:, 0:1, 0:2] / 100),
@@ -194,37 +193,37 @@ class AttentionModel(nn.Module):
 
     def _inner(self, information, distances, slopes, embeddings):
         """
-        :param information: 包含动态元素以及静态元素[batch_size, sequences_size, dim=6]
-        :param distances:  距离矩阵 [batch_size, sequences_size, sequences_size]
-        :param slopes:   坡度矩阵 [batch_size, sequences_size, sequences_size]
-        :param embeddings: information经过编码得到的信息 [batch_size, sequences_size, embedding_dim]
+        :param information:
+        :param distances:
+        :param slopes:
+        :param embeddings:
         :return: tour_idx, tour_logp, R
         """
         outputs = []
         tour_idx = []
         R = []
         batch_size, sequences_size, _ = information.size()
-        # static = information[:,:,0:2]  # 取出静态元素
-        dynamic = information[:,:,2:].permute(0, 2, 1)   # 取出动态元素
-        fixed = self._precompute(embeddings)  # NamedTuple,为编码器解码器传递信息
+        # static = information[:,:,0:2]
+        dynamic = information[:,:,2:].permute(0, 2, 1)
+        fixed = self._precompute(embeddings)
         i = 0
-        max_steps =  100  # 最大步数
-        mask = torch.ones(batch_size, sequences_size, device=device)  # 屏蔽数组
-        now_idx = torch.zeros(batch_size, device=device)  # 当前的坐标
+        max_steps =  1000  # max step
+        mask = torch.ones(batch_size, sequences_size, device=device)
+        now_idx = torch.zeros(batch_size, device=device)
 
         for _ in range(max_steps):
 
-            if not mask.byte().any():  # 当mask任意一个都为0，表示所有点都不能去
+            if not mask.byte().any():
                 break
-            # 选择下一访问的节点 log_p:[batch_size, 1, num_node] mask:[batch_size, num_node]
+
             log_p = self._get_log_p(fixed, dynamic, now_idx, mask)
             selected = self._select_node(log_p.exp()[:, 0, :], mask)
-            # 更新动态信息
+
             dynamic, reward = self.update_dynamic(dynamic, distances, slopes, now_idx, selected)
-            # 更新屏蔽信息
+
             mask = self.update_mask(dynamic, distances, slopes, selected.data).detach()
             now_idx = selected
-            # 添加当前选择结果
+
             outputs.append(log_p[:, 0, :])
             tour_idx.append(selected)
             R.append(reward)
@@ -237,9 +236,9 @@ class AttentionModel(nn.Module):
 
     def sample_many(self, input, batch_rep=1, iter_rep=1):
         """
-        :param batch:数据
-        :param batch_rep:指的是采样宽度
-        :param iter_rep: 迭代的伦次
+        :param batch:
+        :param batch_rep:
+        :param iter_rep:
         :return:
         """
         static, dynamic, distances, slope = input
@@ -252,13 +251,13 @@ class AttentionModel(nn.Module):
         costs = []
         pis = []
         for i in range(iter_rep):
-            tour_idx, tour_logp, R = self.forward(batch)  # tour_idx的形状为[batch,sequence_len]
-            cost = torch.sum(R, dim=1)  # [batch]
-            costs.append(cost.view(batch_rep, -1).t())  # 每一个元素的形状为[batch,batch_rep]
+            tour_idx, tour_logp, R = self.forward(batch)
+            cost = torch.sum(R, dim=1)
+            costs.append(cost.view(batch_rep, -1).t())
             pis.append(tour_idx.view(batch_rep, -1, tour_idx.size(-1)).transpose(0, 1))
-        costs = torch.cat(costs, 1)  # 这里是将迭代伦次的所有batch拼接起来，形状为 [batch,iter_rep]
+        costs = torch.cat(costs, 1)
 
-        # 对不同伦次之间的索引进行拼接
+
         max_length = max(pi.size(-1) for pi in pis)
         pis = torch.cat(
             [F.pad(pi, (0, max_length - pi.size(-1))) for pi in pis],
@@ -267,12 +266,11 @@ class AttentionModel(nn.Module):
 
         minpis = pis[torch.arange(pis.size(0), out=argmincosts.new()), argmincosts]  # [batch_size,min_sequence]
 
-        return mincosts, minpis   # [batch],这个就是采样出来最小的
+        return mincosts, minpis
 
 
     def _select_node(self, probs, mask):
         '''
-        用已知的概率和屏蔽策略选出下一需要访问的点
         :param probs: [batch, num_node]
         :param mask:  [batch, num_node]
         :return: [batch_size]
@@ -353,10 +351,10 @@ class AttentionModel(nn.Module):
 
     def _get_parallel_step_context(self, embeddings, dynamic, now_idx):
         """
-        负责返回每个时间步车辆的当前点信息和当前的转载量
+
         :param embeddings: (batch_size, graph_size, embed_dim)
         :param now_idx: (batch_size, 1)
-        :param dynamic: 动态信息
+        :param dynamic:
         :return: (batch_size, 1, embedding_dim + 1)
         """
         current_node = now_idx[:,None].type(torch.int64)
@@ -372,7 +370,7 @@ class AttentionModel(nn.Module):
                     .expand(batch_size, num_steps, embeddings.size(-1))
                 ).view(batch_size, num_steps, embeddings.size(-1)),
                 dynamic[:, 0:1, 0:1],                   # [batch_size, 1, 1]
-                # dynamic[:, 2:3, 0:1] / self.start_soc,  # 对特征进行归一化至 0~1 这个区间
+                # dynamic[:, 2:3, 0:1] / self.start_soc,
                 # dynamic[:, 3:4, 0:1] / self.t_limit
             ),
             -1
@@ -381,7 +379,7 @@ class AttentionModel(nn.Module):
 
     def _one_to_many_logits(self, query, glimpse_K, glimpse_V, logit_K, mask):
         """
-        用于返回每个节点被选中的概率(log_p)
+
         :param query: [batch_size, 1, embedding_dim]
         :param glimpse_K:
         :param glimpse_V:
@@ -392,9 +390,8 @@ class AttentionModel(nn.Module):
 
         batch_size, num_steps, embed_dim = query.size()
         key_size = val_size = embed_dim // self.n_heads
-        mask = mask[:,None,:].eq(0)  # 等于0的就设为负无穷不准去
+        mask = mask[:,None,:].eq(0)
 
-        # 将glimpse所需的Q变形为：(n_heads, batch_size, num_steps, 1, key_size)
         glimpse_Q = query.view(batch_size, num_steps, self.n_heads, 1, key_size).permute(2, 0, 1, 3, 4)
 
         # Batch matrix multiplication to compute compatibilities (n_heads, batch_size, num_steps, graph_size)

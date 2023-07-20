@@ -7,9 +7,8 @@ import numpy as np
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from nets.PointNetwork import DRL4EVRP
 from utils.reinforce_baselines import ExponentialBaseline, CriticBaseline, RolloutBaseline, WarmupBaseline, StateCritic
-from utils import torch_load_cpu, move_to
+from utils import torch_load_cpu, move_to, plot_delivery_graph
 import math
 import xlwt
 import csv
@@ -20,7 +19,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
 
 
-# ------------------------------------------验证----------------------------------------------------------------------
+# ------------------------------------------valid----------------------------------------------------------------------
 def validate(data_loader, actor, render_fn, num_nodes, charging_num, save_dir='.',
              num_plot=5):
     """Used to monitor progress on a validation set & optionally plot solution."""
@@ -39,7 +38,6 @@ def validate(data_loader, actor, render_fn, num_nodes, charging_num, save_dir='.
 
         with torch.no_grad():
             tour_indices, _, R= actor.forward(x)
-        # print(R.sum(1))
         reward = R.sum(1).mean().item()
         rewards.append(reward)
 
@@ -78,8 +76,8 @@ def train(actor, baseline, optimizer, lr_scheduler, task, num_nodes, train_data_
     """Constructs the main actor  networks, and performs all training."""
     now = '%s' % datetime.datetime.now().time()
     now = now.replace(':', '_')
-    save_dir = os.path.join(task, f"{num_nodes}", f"{baselines}",f"C{num_nodes}_{now}")
-    # 这个是用来存储.pt文件的
+    save_dir = os.path.join("ExperimentalLog", "train", f"{num_nodes}", f"{baselines}", f"C{num_nodes}_{now}")
+
     checkpoint_dir = os.path.join(save_dir, 'checkpoints')
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
@@ -89,15 +87,17 @@ def train(actor, baseline, optimizer, lr_scheduler, task, num_nodes, train_data_
     best_params = None
     best_reward = np.inf
 
-    epoch_reward = []  # 回合的平均奖励
+    epoch_reward = []
     epoch_loss = []
 
-    # 回合开始时创建训练数据保存保存路径
-    out_path_epoch = os.path.join("train_data", f"{num_nodes}", f"{baselines}", f"Epoch_C{num_nodes}_{now}.csv")
-    out_path_batch = os.path.join("train_data", f"{num_nodes}", f"{baselines}", f"Batch_C{num_nodes}_{now}.csv")
+    out_path = os.path.join("ExperimentalData", "train_data", f"{num_nodes}", f"{baselines}")
+    if not os.path.exists(out_path):
+        os.makedirs(out_path)
+
+    out_path_epoch = os.path.join(out_path, f"Epoch_C{num_nodes}_{now}.csv")
+    out_path_batch = os.path.join(out_path, f"Batch_C{num_nodes}_{now}.csv")
 
     for epoch in range(iterations):  # train epoch
-        # 到这个地方再加载数据以保证每个epoch的数据与对应的问题相匹配!!!! 坑1
         train_data = baseline.wrap_dataset(train_data_out)
         train_loader = DataLoader(train_data, batch_size, True, num_workers=0)
 
@@ -109,12 +109,11 @@ def train(actor, baseline, optimizer, lr_scheduler, task, num_nodes, train_data_
         start = epoch_start
 
         for batch_idx, batch in enumerate(train_loader):  # train batch
-            # 设置baseline
+
             x, bl_val = baseline.unwrap_batch(batch)
             bl_val = move_to(bl_val, device) if bl_val is not None else None
-            tour_indices, tour_logp, R= actor(x)  # 输入处理的信息到actor
+            tour_indices, tour_logp, R= actor(x)
             reward = torch.sum(R, dim=1)  # R[batch,sequence_len] -> reward[batch]
-            # energy = torch.sum(e, dim=1)
 
             bl_val, bl_loss = baseline.eval(x, reward) if bl_val is None else (bl_val, 0)
 
@@ -122,19 +121,17 @@ def train(actor, baseline, optimizer, lr_scheduler, task, num_nodes, train_data_
             reinforce_loss = (advantage.detach() * tour_logp.sum(dim=1)).mean()
             loss = reinforce_loss + bl_loss
 
-            # 设置优化器及反向传播
             optimizer.zero_grad()
             loss.backward()
             grad_norms = clip_grad_norms(optimizer.param_groups, max_grad_norm)
             optimizer.step()
 
-            # 记录平均奖励及报道训练时间
             rewards.append(torch.mean(reward.detach()).item())
             losses.append(torch.mean(reinforce_loss.detach()).item())
 
 
             if (batch_idx + 1) % 100 == 0:
-                end = time.time()  # 这里是报道每100个batch的训练时间
+                end = time.time()
                 times.append(end - start)
                 start = end
 
@@ -149,8 +146,8 @@ def train(actor, baseline, optimizer, lr_scheduler, task, num_nodes, train_data_
                       (batch_idx, len(train_loader), mean_reward,  mean_loss,
                        times[-1]))
 
-        mean_loss = np.mean(losses)  # 整个epoch，及所有batch的平均损失
-        mean_reward = np.mean(rewards)  # 整个epoch，及所有batch的平均奖励
+        mean_loss = np.mean(losses)
+        mean_reward = np.mean(rewards)
         mean_time =np.mean(times)
 
         epoch_reward.append(mean_reward)
@@ -171,21 +168,21 @@ def train(actor, baseline, optimizer, lr_scheduler, task, num_nodes, train_data_
             os.path.join(epoch_dir, 'epoch-{}.pt'.format(epoch))
         )
 
-        # 每个 epoch 验证一下并画图
+
         valid_dir = os.path.join(save_dir, '%s' % epoch)
         mean_valid = validate(valid_loader, actor,  render_fn, num_nodes, charging_num,
-                              valid_dir, num_plot=1)  # 画图保存到save_dir下面
+                              valid_dir, num_plot=1)
 
-        # 实时写入csv文件
+
         with open(out_path_epoch, "a", newline='') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow([mean_reward, mean_loss, mean_time, mean_valid])
 
         baseline.epoch_callback(actor, epoch)
-        # lr_scheduler should be called at end of epoch，最后再做学习率的衰减
+        # lr_scheduler should be called at end of epoch
         lr_scheduler.step()
 
-        # 先对验证集进行测试，再保存最优的参数
+
         if mean_valid < best_reward:
             best_reward = mean_valid
 
@@ -213,7 +210,6 @@ def train_EVRP(args):
     """
     train
     """
-    from problems import EVRP
     from problems.EVRP import VehicleRoutingDataset
     if args.model == "DRL":
         from nets.DRLModel import AttentionModel
@@ -325,7 +321,7 @@ def train_EVRP(args):
         kwargs['lr_scheduler'] = lr_scheduler
         kwargs['train_data_out'] = train_data
         kwargs['valid_data'] = valid_data
-        kwargs['render_fn'] = EVRP.render
+        kwargs['render_fn'] = plot_delivery_graph
         # train
         epoch_reward, epoch_loss= train(actor, baseline, **kwargs)
         # save data to excel
@@ -385,7 +381,7 @@ def train_EVRP(args):
             save_dataset(thedata, filename)
         widths = args.width if args.width is not None else [0]  # list
         for width in widths:
-            mean_costs, duration = eval_dataset(test_data, width, args.softmax_temperature, args, actor, EVRP.render)
+            mean_costs, duration = eval_dataset(test_data, width, args.softmax_temperature, args, actor, plot_delivery_graph)
 
 
 #  test function
@@ -403,7 +399,10 @@ def eval_dataset(test_date, width, softmax_temp, args, actor, render):
     if not args.CVRP_lib_test:
         now_time = '%s' % datetime.datetime.now().time()
         now_time = now_time.replace(':', '_')
-        output_path = os.path.join("test", f"{args.num_nodes}", "data_record", f"{now_time}.csv")
+        output_path = os.path.join("ExperimentalLog", "test", f"{args.num_nodes}", "data_record")
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+        output_path = os.path.join(output_path, f"{now_time}.csv")
         with open(output_path, "a", newline='') as csvfile:
             writer = csv.writer(csvfile)
             for i in range(len(costs)):
@@ -457,9 +456,9 @@ def _eval_dataset(model, dataset, width, softmax_temp, args, render=None):
             static, dynamic, _, _ = batch
             name = f'batch%d_%2.4f.png' % (batch_idx, costs[0].item())
             if not args.CVRP_lib_test:
-                path = os.path.join("test", f"{args.num_nodes}", "graph")
+                path = os.path.join("ExperimentalLog", "test", f"{args.num_nodes}", "graph")
             else:
-                path = os.path.join("test", "Experimental data/CVRPlib")
+                path = os.path.join("ExperimentalLog", "test", "CVRPlib")
             if not os.path.exists(path):
                 os.makedirs(path)
             save_path =os.path.join(path, name)
@@ -478,6 +477,6 @@ def make_instance(i):
 def EVRPDataset(filename=None,  num_samples=256, offset=0):
     assert os.path.splitext(filename)[1] == '.pkl'
     with open(filename, 'rb') as f:
-        data = pickle.load(f)  # (N, size, 2)
+        data = pickle.load(f)
     data = [make_instance(i) for i in data[offset:offset + num_samples]]
     return data

@@ -53,10 +53,10 @@ class EVRP():
         self.slope = instance["slope"]
 
         self.demands = self.dynamic[1] * args.max_load
-        num_dict = {15:10, 25:20, 59:50, 109:50, 26:20}
+        num_dict = args.nodes
         self.num = self.static.shape[1]
         self.custom_num = num_dict[self.num]
-        self.charge_num = self.num - self.custom_num - 1
+        self.charge_num = args.charging_num
         self.plot_num = args.plot_num
 
         self.max_load = args.max_load
@@ -296,14 +296,12 @@ class EVRP():
 
 
     def createRandomDestory(self,):
-
         d = random.uniform(self.rand_d_min, self.rand_d_max)
         reomve_list = random.sample(range(self.charge_num + 1, self.custom_num + self.charge_num + 1), int(d * self.custom_num))
         return reomve_list
 
 
     def createWorseDestory(self, sol):
-
         deta_f = []
         for node_no in sol.node_seq:
             nodes_seq_ = copy.deepcopy(sol.node_seq)
@@ -318,7 +316,6 @@ class EVRP():
 
 
     def createRandomRepair(self, remove_list, sol):
-
         unassigned_nodes_seq = []
         assigned_nodes_seq = []
         # remove node from current solution
@@ -426,7 +423,6 @@ class EVRP():
         pass
 
     def selectDestoryRepair(self,):
-
         d_weight = self.d_weight
         d_cumsumprob = (d_weight / sum(d_weight)).cumsum()
         d_cumsumprob -= np.random.rand()
@@ -458,7 +454,6 @@ class EVRP():
 
 
     def resetScore(self,):
-
         self.d_select = np.zeros(2)
         self.d_score = np.zeros(2)
         self.r_select = np.zeros(3)
@@ -466,7 +461,6 @@ class EVRP():
 
 
     def updateWeight(self, ):
-
         for i in range(self.d_weight.shape[0]):
             if self.d_select[i] > 0:
                 self.d_weight[i] = self.d_weight[i] * (1 - self.rho) + self.rho * self.d_score[i] / self.d_select[i]
@@ -486,7 +480,6 @@ class EVRP():
 
 
     def plot_graph(self, solution):
-
         routes = solution.routes
         fig = plt.figure(figsize=(10, 10))
         xc = self.static[0, :]
@@ -506,16 +499,20 @@ class EVRP():
             for i in range(1, len(routes[k])):
                 plt.annotate(text="", xy=(xc[routes[k][i]], yc[routes[k][i]]),
                              xytext=(xc[routes[k][i - 1]], yc[routes[k][i - 1]]), arrowprops=dict(arrowstyle='->'))
-        plt.xlim(-5, 105)
-        plt.ylim(-5, 105)
-        save_path = os.path.join("graph", f"{self.custom_num}", "ACO")
+        # plt.xlim(-5, 105)
+        # plt.ylim(-5, 105)
+        if not args.CVRP_lib_test:
+            save_path = os.path.join("graph", f"{self.custom_num}", "ALNS")
+        else:
+            save_path = os.path.join("graph",  "CVRPlib")
+        if not os.path.exists(save_path):
+            os.mkdir(save_path)
         name = f'batch%d_%2.4f.png' % (self.i, solution.cost)
         save_path = os.path.join(save_path, name)
         plt.savefig(save_path, bbox_inches='tight', dpi=100)
 
 
     def run(self):
-
         start = time.time()
         phi = self.phi
         sol = Sol()
@@ -585,7 +582,7 @@ if __name__ == '__main__':
     parser.add_argument('--phi', default=0.8, type=int, )
 
     args = parser.parse_args()
-    filename = os.path.join("..","test_data",f"{args.nodes}","256_seed12345.pkl")
+    filename = os.path.join()
     date = HCVRPDataset(filename, num_samples=256, offset=0)
 
     costs = []

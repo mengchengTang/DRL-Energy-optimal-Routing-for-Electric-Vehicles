@@ -37,8 +37,8 @@ class VehicleRoutingDataset(Dataset):
         self.motor_r = 0.85
         self.battery_d = 1.11
         self.battery_r = 0.93
-        self.charging_time = 1   # charge for an hour
-        self.serve_time = 0.33   # 20 minutes of customer service
+        self.charging_time = 1    # charge for an hour
+        self.serve_time = 0.33    # 20 minutes of customer service
         # Charging station coordinate generation
         coordinate_x1 = torch.randint(0, 50, (num_samples, 1, 20))
         coordinate_x2 = torch.randint(51, 101, (num_samples, 1, 20))
@@ -77,14 +77,14 @@ class VehicleRoutingDataset(Dataset):
         Elevations =torch.randint(0,101,(num_samples, input_size + 1 + charging_num),device=device)
         Elevations =( Elevations / 1000 )
         loads = torch.full(dynamic_shape, 1.)
-        self.Elevation = Elevations                                                            # 充电站和仓库的需求设置为0
-        SOC = torch.full(dynamic_shape, self.Start_SOC)                                        # 电池容量
-        time1 = torch.full(dynamic_shape, t_limit)                                              # 设置时间限制
+        self.Elevation = Elevations
+        SOC = torch.full(dynamic_shape, self.Start_SOC)
+        time1 = torch.full(dynamic_shape, t_limit)
         self.dynamic = torch.as_tensor(np.concatenate((loads, demands, SOC, time1), axis=1))
 
         if (input_size <= 20 or num_samples <= 12800):   #  If the scale of the problem is small, it is directly calculated when making the data
             seq_len = 1 + charging_num + input_size
-            self.distances = torch.zeros(num_samples, seq_len, seq_len,device=device,)                          # 计算距离矩阵
+            self.distances = torch.zeros(num_samples, seq_len, seq_len,device=device,)
             for i in range(seq_len):
                 self.distances[:, i] = torch.sqrt(torch.sum(torch.pow(self.static[:,:,i:i+1]-self.static[:,:,:],2),dim=1))
             self.slope =torch.zeros(num_samples, seq_len, seq_len,device=device)
@@ -147,37 +147,37 @@ class VehicleRoutingDataset(Dataset):
             new_mask[combined.nonzero(as_tuple=False), 0] = 1
             new_mask[combined.nonzero(as_tuple=False), 1:] = 0
 
-        # 屏蔽条件5，下次解码电量或时间不能直接到达的点: ->节点->节点
-        distance0 = distances[torch.arange(distances.size(0)), chosen_idx].clone()                  #选出t时刻所选择的点到其它点的距离
+        # Masking condition 5, the point where the next decoding power or time cannot be directly reached: ->node->node
+        distance0 = distances[torch.arange(distances.size(0)), chosen_idx].clone()
         slope1 = slope[torch.arange(distances.size(0)),  chosen_idx]
-        time_cons0 = distance0 / self.velocity  # t时刻所选择的点到其它点所消耗的时间
+        time_cons0 = distance0 / self.velocity
 
-        mass0 = (self.mc + loads[:, 0] * self.max_load * self.w).unsqueeze(1).expand_as(distance0)   # (batch,sequence_len)
-        Pm0 = (0.5*self.Cd*self.A*self.Ad*(self.velocity/3.6)**2+mass0*self.g*slope1+mass0*self.g*self.Cr)*self.velocity    #行驶功率的确定
+        mass0 = (self.mc + loads[:, 0] * self.max_load * self.w).unsqueeze(1).expand_as(distance0)                        # (batch,sequence_len)
+        Pm0 = (0.5*self.Cd*self.A*self.Ad*(self.velocity/3.6)**2+mass0*self.g*slope1+mass0*self.g*self.Cr)*self.velocity
         positive_index0 = Pm0.gt(0.)
         negative_index0 = Pm0.lt(0.)
         soc_consume0 = torch.zeros_like(Pm0)
         soc_consume0[positive_index0]=self.motor_d*self.battery_d*Pm0[positive_index0]*time_cons0[positive_index0] / 3600.
         soc_consume0[negative_index0]=self.motor_r*self.battery_r*Pm0[negative_index0]*time_cons0[negative_index0] / 3600.
-        SOC_cons0 = soc_consume0                                                                     # t时刻所选择的点到其它点消耗的soc
+        SOC_cons0 = soc_consume0
 
-        # 屏蔽条件6，下次解码因为返回仓库时间或不够的:  -> 节点 -> 仓库
-        # 先去一个点的行驶能耗计算
+        # Masking condition 6, the next decoding is because the return depot time or not enough: -> node -> warehouse
+        # First go to the calculation of driving energy consumption at one point
         time_cons1 = distance0 / self.velocity
-        slope1 = slope[torch.arange(distances.size(0)), chosen_idx]                               # (batch, sequence_len)
+        slope1 = slope[torch.arange(distances.size(0)), chosen_idx]                                                       # (batch, sequence_len)
         mass1 = (self.mc + loads[:, 0] * self.max_load * self.w).unsqueeze(1).expand_as(distance0)
-        Pm1 = (0.5 * self.Cd * self.A * self.Ad * (self.velocity/3.6) ** 2 + mass1 * self.g * slope1 + mass1 * self.g * self.Cr) * self.velocity  # 行驶功率的确定
+        Pm1 = (0.5 * self.Cd * self.A * self.Ad * (self.velocity/3.6) ** 2 + mass1 * self.g * slope1 + mass1 * self.g * self.Cr) * self.velocity
         positive_index1 = Pm1.gt(0.)
         negative_index1 = Pm1.lt(0.)
         soc_consume1 = torch.zeros_like(Pm1)
         soc_consume1[positive_index1] = self.motor_d * self.battery_d * Pm1[positive_index1] * time_cons1[positive_index1] / 3600.
         soc_consume1[negative_index1] = self.motor_r * self.battery_r * Pm1[negative_index1] * time_cons1[negative_index1] / 3600.
         SOC_cons1 = soc_consume1
-        # 再从这个点返回仓库的能耗
+        # From this point back to the energy consumption of the depot
         mass2 = (self.mc + (loads - demands)  * self.max_load * self.w)
         time_cons2 = distances[:, 0, :] / self.velocity
         slope2 =slope[torch.arange(distances.size(0)), 0 ]
-        Pm2 = (0.5 * self.Cd * self.A * self.Ad * (self.velocity/3.6) ** 2 + mass2 * self.g * slope2 + mass2 * self.g * self.Cr) * self.velocity  # 行驶功率的确定
+        Pm2 = (0.5 * self.Cd * self.A * self.Ad * (self.velocity/3.6) ** 2 + mass2 * self.g * slope2 + mass2 * self.g * self.Cr) * self.velocity
         positive_index2 = Pm2.gt(0.)
         negative_index2 = Pm2.lt(0.)
         soc_consume2 = torch.zeros_like(Pm2)
@@ -187,11 +187,12 @@ class VehicleRoutingDataset(Dataset):
 
         SOC_cons3 = SOC_cons1 + SOC_cons2
         SOC_cons3[:, 0:self.charging_num + 1 ] = 0
-        time_cons3 = (distances[torch.arange(distances.size(0)), chosen_idx] + distances[:, 0, :]) / self.velocity   #去客户点
+        time_cons3 = (distances[torch.arange(distances.size(0)), chosen_idx] + distances[:, 0, :]) / self.velocity
         time_cons3[:, 1:self.charging_num + 1] += self.charging_time
         time_cons3[:, self.charging_num + 1:] += self.serve_time
 
-        # 屏蔽条件7: 下次解码绕道到最近充电站而因为时间或者电量不能返回仓库的->节点-> 充电站-> 仓库
+        # Masking condition 7: The next decoding detours to the nearest charging station and cannot return to the depot due to time or power
+        # -> node -> charging station -> warehouse
         distances_station = [distances[:, i:i+1, :] for i in range(1, self.charging_num + 1)]
         distances_station = torch.cat(distances_station, dim=1)  # [batch, charging_num, sequence_num]
         distances_station = torch.min(distances_station, dim=1)  # [batch,  sequence_num]
@@ -204,14 +205,14 @@ class VehicleRoutingDataset(Dataset):
         positive_index2 = Pm3.gt(0.)
         negative_index2 = Pm3.lt(0.)
         soc_consume4 = torch.zeros_like(Pm3)
-        # 计算到最近的充电站的能耗
+
         soc_consume4[positive_index2] = self.motor_d * self.battery_d * Pm3[positive_index2] * time_cons4[positive_index2] / 3600.
         soc_consume4[negative_index2] = self.motor_r * self.battery_r * Pm3[negative_index2] * time_cons4[negative_index2] / 3600.
         SOC_cons4 = soc_consume4
         SOC_cons5 = SOC_cons1 + SOC_cons4
         time_cons5 = (distance0 + distance3 + distance4) / self.velocity
         time_cons5[:, self.charging_num + 1:] += (self.charging_time + self.serve_time)
-        # 屏蔽
+
         new_mask[(SOC < SOC_cons0) | (time < time_cons0)] = 0
 
         new_mask[((SOC < SOC_cons3) | (time < time_cons3)) & ((SOC < SOC_cons5) | (time < time_cons5))] = 0
@@ -272,7 +273,7 @@ class VehicleRoutingDataset(Dataset):
 
         if depot.any():
             all_loads[depot.nonzero(as_tuple=False).squeeze()] = 1.
-            all_demands[depot.nonzero(as_tuple=False).squeeze(), 0] = 0.  # 只有去到仓库才会把这一点清零
+            all_demands[depot.nonzero(as_tuple=False).squeeze(), 0] = 0.
 
         new_dynamic = torch.cat((all_loads.unsqueeze(1), all_demands.unsqueeze(1), all_SOC.unsqueeze(1),all_time.unsqueeze(1)),1).to(device)
 
